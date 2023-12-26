@@ -202,8 +202,8 @@ def main():
 	options = check_input(device_opt, process_input(device_opt))
 
 	docs = {}
-	docs["shortdesc"] = "Fence agent for IPMI"
-	docs["longdesc"] = "{} is a Power Fencing agent \
+	docs["shortdesc"] = "Fence agent for MOLD (IPMI TEST)"
+	docs["longdesc"] = "{} is a Power Fencing agent MOLD (IPMI TEST) \
 which can be used with machines controlled by IPMI. \
 This agent calls support software ipmitool (http://ipmitool.sf.net/). \
 WARNING! This fence agent might report success before the node is powered off. \

@@ -1,12 +1,14 @@
 #!/usr/bin/python -tt
 
 import sys, getopt, time, os, uuid, pycurl, stat
+from filecmp import cmp
+
 import pexpect, re, syslog
 import logging
 import subprocess
 import threading
 import shlex
-import exceptions
+import builtins as exceptions
 import socket
 import textwrap
 import __main__
@@ -528,16 +530,17 @@ def fail(error_code):
 	sys.exit(EC_GENERIC_ERROR)
 
 def usage(avail_opt):
-	print "Usage:"
-	print "\t" + os.path.basename(sys.argv[0]) + " [options]"
-	print "Options:"
+	print("Usage:")
+	print("\t" + os.path.basename(sys.argv[0]) + " [options]")
+	print("Options:")
 
 	sorted_list = [(key, all_opt[key]) for key in avail_opt]
 	sorted_list.sort(lambda x, y: cmp(x[1]["order"], y[1]["order"]))
 
 	for key, value in sorted_list:
 		if len(value["help"]) != 0:
-			print "   " + _join_wrap([value["help"]], first_indent=3)
+			print("   " + _join_wrap([value["help"]], first_indent=3))
+
 
 def metadata(avail_opt, docs):
 	# avail_opt has to be unique, if there are duplicities then they should be removed
@@ -545,17 +548,17 @@ def metadata(avail_opt, docs):
 	sorted_list.sort(lambda x, y: cmp(x[0], y[0]))
 	sorted_list.sort(lambda x, y: cmp(x[1]["order"], y[1]["order"]))
 
-	print "<?xml version=\"1.0\" ?>"
-	print "<resource-agent name=\"" + os.path.basename(sys.argv[0]) + \
-			"\" shortdesc=\"" + docs["shortdesc"] + "\" >"
+	print("<?xml version=\"1.0\" ?>")
+	print("<resource-agent name=\"" + os.path.basename(sys.argv[0]) +
+		  "\" shortdesc=\"" + docs["shortdesc"] + "\" >")
 	for (symlink, desc) in docs.get("symlink", []):
-		print "<symlink name=\"" + symlink + "\" shortdesc=\"" + desc + "\"/>"
-	print "<longdesc>" + docs["longdesc"] + "</longdesc>"
-	print "<vendor-url>" + docs["vendorurl"] + "</vendor-url>"
-	print "<parameters>"
+		print("<symlink name=\"" + symlink + "\" shortdesc=\"" + desc + "\"/>")
+	print("<longdesc>" + docs["longdesc"] + "</longdesc>")
+	print("<vendor-url>" + docs["vendorurl"] + "</vendor-url>")
+	print("<parameters>")
 	for option, _ in sorted_list:
 		if all_opt[option].has_key("help") and len(all_opt[option]["help"]) > 0:
-			print "\t<parameter name=\"" + option + "\" unique=\"0\" required=\"" + all_opt[option]["required"] + "\">"
+			print("\t<parameter name=\"" + option + "\" unique=\"0\" required=\"" + all_opt[option]["required"] + "\">")
 
 			default = ""
 			if all_opt[option].has_key("default"):
@@ -573,32 +576,33 @@ def metadata(avail_opt, docs):
 			else:
 				shortdesc = all_opt[option]["shortdesc"]
 
-			print "\t\t<getopt mixed=\"" + mixed + "\" />"
+			print("\t\t<getopt mixed=\"" + mixed + "\" />")
 			if all_opt[option].has_key("choices"):
-				print "\t\t<content type=\"select\" "+default+" >"
+				print("\t\t<content type=\"select\" " + default + " >")
 				for choice in all_opt[option]["choices"]:
-					print "\t\t\t<option value=\"%s\" />" % (choice)
-				print "\t\t</content>"
+					print("\t\t\t<option value=\"%s\" />" % (choice))
+				print("\t\t</content>")
 			elif all_opt[option]["getopt"].count(":") > 0:
-				print "\t\t<content type=\"string\" "+default+" />"
+				print("\t\t<content type=\"string\" " + default + " />")
 			else:
-				print "\t\t<content type=\"boolean\" "+default+" />"
-			print "\t\t<shortdesc lang=\"en\">" + shortdesc + "</shortdesc>"
-			print "\t</parameter>"
-	print "</parameters>"
-	print "<actions>"
+				print("\t\t<content type=\"boolean\" " + default + " />")
+			print("\t\t<shortdesc lang=\"en\">" + shortdesc + "</shortdesc>")
+			print("\t</parameter>")
+	print("</parameters>")
+	print("<actions>")
 
 	(available_actions, _) = _get_available_actions(avail_opt)
 
 	if "on" in available_actions:
 		available_actions.remove("on")
 		on_target = ' on_target="1"' if avail_opt.count("on_target") else ''
-		print "\t<action name=\"on\"%s automatic=\"%d\"/>" % (on_target, avail_opt.count("fabric_fencing"))
+		print("\t<action name=\"on\"%s automatic=\"%d\"/>" % (on_target, avail_opt.count("fabric_fencing")))
 
 	for action in available_actions:
-		print "\t<action name=\"%s\" />" % (action)
-	print "</actions>"
-	print "</resource-agent>"
+		print("\t<action name=\"%s\" />" % (action))
+	print("</actions>")
+	print("</resource-agent>")
+
 
 def process_input(avail_opt):
 	avail_opt.extend(_add_dependency_options(avail_opt))
@@ -730,7 +734,7 @@ def set_multi_power_fn(connection, options, set_power_fn, get_power_fn, retry_at
 			set_power_fn(connection, options)
 			time.sleep(int(options["--power-wait"]))
 
-		for _ in xrange(int(options["--power-timeout"])):
+		for _ in range(int(options["--power-timeout"])):
 			if get_multi_power_fn(connection, options, get_power_fn) != options["--action"]:
 				time.sleep(1)
 			else:
@@ -756,8 +760,8 @@ def show_docs(options, docs=None):
 		sys.exit(0)
 
 	if options.has_key("--version"):
-		print __main__.RELEASE_VERSION, __main__.BUILD_DATE
-		print __main__.REDHAT_COPYRIGHT
+		print(__main__.RELEASE_VERSION, __main__.BUILD_DATE)
+		print(__main__.REDHAT_COPYRIGHT)
 		sys.exit(0)
 
 def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_list=None, reboot_cycle_fn=None):
@@ -774,12 +778,12 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 			0 == options["device_opt"].count("port_as_ip")):
 
 			if 0 == options["device_opt"].count("port"):
-				print "N/A"
+				print("N/A")
 			elif get_outlet_list == None:
 				## @todo: exception?
 				## This is just temporal solution, we will remove default value
 				## None as soon as all existing agent will support this operation
-				print "NOTICE: List option is not working on this device yet"
+				print("NOTICE: List option is not working on this device yet")
 			else:
 				options["--original-action"] = options["--action"]
 				options["--action"] = "list"
@@ -795,9 +799,9 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 						status = status.upper()
 
 					if options["--action"] == "list":
-						print outlet_id + options["--separator"] + alias
+						print(outlet_id + options["--separator"] + alias)
 					elif options["--action"] == "list-status":
-						print outlet_id + options["--separator"] + alias + options["--separator"] + status
+						print(outlet_id + options["--separator"] + alias + options["--separator"] + status)
 
 			return
 
@@ -813,17 +817,17 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 
 		if options["--action"] == status:
 			if not (status == "on" and "force_on" in options["device_opt"]):
-				print "Success: Already %s" % (status.upper())
+				print("Success: Already %s" % (status.upper()))
 				return 0
 
 		if options["--action"] == "on":
 			if set_multi_power_fn(connection, options, set_power_fn, get_power_fn, 1 + int(options["--retry-on"])):
-				print "Success: Powered ON"
+				print("Success: Powered ON")
 			else:
 				fail(EC_WAITING_ON)
 		elif options["--action"] == "off":
 			if set_multi_power_fn(connection, options, set_power_fn, get_power_fn):
-				print "Success: Powered OFF"
+				print("Success: Powered OFF")
 			else:
 				fail(EC_WAITING_OFF)
 		elif options["--action"] == "reboot":
@@ -847,7 +851,7 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 
 				try:
 					power_on = set_multi_power_fn(connection, options, set_power_fn, get_power_fn, int(options["--retry-on"]))
-				except Exception, ex:
+				except Exception as ex:
 					# an error occured during power ON phase in reboot
 					# fence action was completed succesfully even in that case
 					logging.warning("%s", str(ex))
@@ -856,9 +860,9 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 				# this should not fail as node was fenced succesfully
 				logging.error('Timed out waiting to power ON\n')
 
-			print "Success: Rebooted"
+			print("Success: Rebooted")
 		elif options["--action"] == "status":
-			print "Status: " + status.upper()
+			print("Status: " + status.upper())
 			if status.upper() == "OFF":
 				result = 2
 		elif options["--action"] == "monitor":
@@ -867,10 +871,10 @@ def fence_action(connection, options, set_power_fn, get_power_fn, get_outlet_lis
 		fail(EC_CONNECTION_LOST)
 	except pexpect.TIMEOUT:
 		fail(EC_TIMED_OUT)
-	except pycurl.error, ex:
+	except pycurl.error as ex:
 		logging.error("%s\n", str(ex))
 		fail(EC_TIMED_OUT)
-	except socket.timeout, ex:
+	except socket.timeout as ex:
 		logging.error("%s\n", str(ex))
 		fail(EC_TIMED_OUT)
 
@@ -894,10 +898,10 @@ def fence_login(options, re_login_string=r"(login\s*: )|((?!Last )Login Name:  )
 			conn = _login_ssh_with_identity_file(options)
 		else:
 			conn = _login_telnet(options, re_login_string)
-	except pexpect.EOF, exception:
+	except pexpect.EOF as exception:
 		logging.debug("%s", str(exception))
 		fail(EC_LOGIN_DENIED)
-	except pexpect.TIMEOUT, exception:
+	except pexpect.TIMEOUT as exception:
 		logging.debug("%s", str(exception))
 		fail(EC_LOGIN_DENIED)
 	return conn
@@ -1002,7 +1006,7 @@ def _open_ssl_connection(options):
 		(options["--gnutlscli-path"], gnutls_opts, ssl_opts, options["--ipport"], options["--ip"])
 	try:
 		conn = fspawn(options, command)
-	except pexpect.ExceptionPexpect, ex:
+	except pexpect.ExceptionPexpect as ex:
 		logging.error("%s\n", str(ex))
 		sys.exit(EC_GENERIC_ERROR)
 
@@ -1309,7 +1313,7 @@ def _parse_input_cmdline(avail_opt):
 		(entered_opt, left_arg) = getopt.gnu_getopt(sys.argv[1:], getopt_string, longopt_list)
 		if len(left_arg) > 0:
 			logging.warning("Unused arguments on command line: %s" % (str(left_arg)))
-	except getopt.GetoptError, error:
+	except getopt.GetoptError as error:
 		fail_usage("Parse error: " + error.msg)
 
 	for opt in avail_opt:

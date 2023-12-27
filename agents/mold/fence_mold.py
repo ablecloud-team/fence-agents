@@ -1,236 +1,276 @@
-#!@PYTHON@ -tt
+#!/usr/bin/python3 -tt
 
-import sys, re, os
+import sys, re
+import logging
 import atexit
-sys.path.append("@FENCEAGENTSLIBDIR@")
+sys.path.append("/usr/share/fence")
 from fencing import *
-from fencing import fail_usage, is_executable, run_command, run_delay
+from fencing import fail, fail_usage, run_delay, EC_STATUS, SyslogLibHandler
+
+import requests
+from requests import HTTPError
 
 try:
-	from shlex import quote
+	import boto3
+	from botocore.exceptions import ConnectionError, ClientError, EndpointConnectionError, NoRegionError
 except ImportError:
-	from pipes import quote
+	pass
 
-def get_power_status(_, options):
-	output = _run_command(options, "status")
-	match = re.search('[Cc]hassis [Pp]ower is [\\s]*([a-zA-Z]{2,3})', str(output))
-	status = match.group(1) if match else None
-	return status
+logger = logging.getLogger()
+logger.propagate = False
+logger.setLevel(logging.INFO)
+logger.addHandler(SyslogLibHandler())
+logging.getLogger('botocore.vendored').propagate = False
 
-def set_power_status(_, options):
-	_run_command(options, options["--action"])
-	return
+def get_instance_id(options):
+	try:
+		token = requests.put('http://169.254.169.254/latest/api/token', headers={"X-aws-ec2-metadata-token-ttl-seconds" : "21600"}).content.decode("UTF-8")
+		r = requests.get('http://169.254.169.254/latest/meta-data/instance-id', headers={"X-aws-ec2-metadata-token" : token}).content.decode("UTF-8")
+		return r
+	except HTTPError as http_err:
+		logger.error('HTTP error occurred while trying to access EC2 metadata server: %s', http_err)
+	except Exception as err:
+		if "--skip-race-check" not in options:
+			logger.error('A fatal error occurred while trying to access EC2 metadata server: %s', err)
+		else:
+			logger.debug('A fatal error occurred while trying to access EC2 metadata server: %s', err)
+	return None
 
-def reboot_cycle(_, options):
-	output = _run_command(options, "cycle")
-	return bool(re.search('chassis power control: cycle', str(output).lower()))
 
-def reboot_diag(_, options):
-	output = _run_command(options, "diag")
-	return bool(re.search('chassis power control: diag', str(output).lower()))
+def get_nodes_list(conn, options):
+	logger.debug("Starting monitor operation")
+	result = {}
+	try:
+		if "--filter" in options:
+			filter_key   = options["--filter"].split("=")[0].strip()
+			filter_value = options["--filter"].split("=")[1].strip()
+			filter = [{ "Name": filter_key, "Values": [filter_value] }]
+			for instance in conn.instances.filter(Filters=filter):
+				result[instance.id] = ("", None)
+		else:
+			for instance in conn.instances.all():
+				result[instance.id] = ("", None)
+	except ClientError:
+		fail_usage("Failed: Incorrect API Key or Secret Key.")
+	except EndpointConnectionError:
+		fail_usage("Failed: Incorrect Zone.")
+	except ConnectionError as e:
+		fail_usage("Failed: Unable to connect to MOLD: " + str(e))
+	except Exception as e:
+		logger.error("Failed to get node list: %s", e)
+	logger.debug("Monitor operation OK: %s",result)
+	return result
 
-def _run_command(options, action):
-	cmd, log_cmd = create_command(options, action)
-	return run_command(options, cmd, log_command=log_cmd)
+def excuteApi(request, args):
+	secretkey=args.secretkey
 
-def create_command(options, action):
-	class Cmd:
-		cmd = ""
-		log = ""
+	baseurl=args.api_protocol+'://'+args.ip_address+':'+args.port+'/client/api?'
+	request_str='&'.join(['='.join([k,urllib.parse.quote_plus(request[k])]) for k in request.keys()])
+	sig_str='&'.join(['='.join([k.lower(),urllib.parse.quote_plus(request[k]).lower().replace('+','%20')])for k in sorted(request)])
+	sig=hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256)
+	sig=hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256).digest()
+	sig=base64.encodebytes(hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256).digest())
+	sig=base64.encodebytes(hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256).digest()).strip()
+	sig=urllib.parse.quote_plus(base64.encodebytes(hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256).digest()).strip())
 
-		@classmethod
-		def append(cls, cmd, log=None):
-			cls.cmd += cmd
-			cls.log += (cmd if log is None else log)
+	req=baseurl+request_str+'&signature='+sig
+	context = ssl._create_unverified_context()
+	res=urllib.request.urlopen(req, context=context)
+	return res.read().decode()
 
-	# --use-sudo / -d
-	if "--use-sudo" in options:
-		Cmd.append(options["--sudo-path"] + " ")
+def listVirtualMachines(args):
+	# reqest 세팅
+	request={}
+	request['command']=args.command
+	request['id']=args.vmid
+	request['response']='json'
+	request['apikey']=args.apikey
 
-	Cmd.append(options["--ipmitool-path"])
+	# API 호출
+	result = excuteApi(request, args)
+	data = json.loads(result)
+	state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
+	print(state_value)
 
-	# --lanplus / -L
-	if "--lanplus" in options and options["--lanplus"] in ["", "1"]:
-		Cmd.append(" -I lanplus")
-	else:
-		Cmd.append(" -I lan")
+def get_power_status(conn, options):
+	logger.debug("Starting status operation")
+	try:
+		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [options["--plug"]]}])
+		state = list(instance)[0].state["Name"]
 
-	# --ip / -a
-	Cmd.append(" -H " + options["--ip"])
+		logger.debug("Status operation for EC2 instance %s returned state: %s",options["--plug"],state.upper())
+		if state == "running":
+			return "on"
+		elif state == "stopped":
+			return "off"
+		else:
+			return "unknown"
 
-	# --port / -n
-	if "--ipport" in options:
-		Cmd.append(" -p " + options["--ipport"])
+	except ClientError:
+		fail_usage("Failed: Incorrect API Key or Secret Key.")
+	except EndpointConnectionError:
+		fail_usage("Failed: Incorrect Zone.")
+	except IndexError:
+		fail(EC_STATUS)
+	except Exception as e:
+		logger.error("Failed to get power status: %s", e)
+		fail(EC_STATUS)
 
-	# --target
-	if "--target" in options:
-		Cmd.append(" -t " + options["--target"])
+def get_self_power_status(conn, instance_id):
+	try:
+		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [instance_id]}])
+		state = list(instance)[0].state["Name"]
 
-	# --username / -l
-	if "--username" in options and len(options["--username"]) != 0:
-		Cmd.append(" -U " + quote(options["--username"]))
+		if state == "running":
+			logger.debug("Captured my (%s) state and it %s - returning OK - Proceeding with fencing",instance_id,state.upper())
+			return "ok"
+		else:
+			logger.debug("Captured my (%s) state it is %s - returning Alert - Unable to fence other nodes",instance_id,state.upper())
+			return "alert"
 
-	# --auth / -A
-	if "--auth" in options:
-		Cmd.append(" -A " + options["--auth"])
+	except ClientError:
+		fail_usage("Failed: Incorrect API Key or Secret Key.")
+	except EndpointConnectionError:
+		fail_usage("Failed: Incorrect Zone.")
+	except IndexError:
+		return "fail"
 
-	# --password / -p
-	if "--password" in options:
-		Cmd.append(" -P " + quote(options["--password"]), " -P [set]")
-	else:
-		Cmd.append(" -P ''", " -P [set]")
-
-	# --cipher / -C
-	if "--cipher" in options:
-		Cmd.append(" -C " + options["--cipher"])
-
-	if "--privlvl" in options:
-		Cmd.append(" -L " + options["--privlvl"])
-
-	if "--hexadecimal-kg" in options:
-		Cmd.append(" -y " + options["--hexadecimal-kg"])
-
-	if "--ipmitool-timeout" in options:
-		Cmd.append(" -N " + options["--ipmitool-timeout"])
-
-	# --action / -o
-	Cmd.append(" chassis power " + action)
-
-	# --verbose-level
-	if options["--verbose-level"] > 1:
-		Cmd.append(" -" + "v" * (options["--verbose-level"] - 1))
-
-	return (Cmd.cmd, Cmd.log)
+def set_power_status(conn, options):
+	my_instance = get_instance_id(options)
+	try:
+		if (options["--action"]=="off"):
+			if "--skip-race-check" in options or get_self_power_status(conn,my_instance) == "ok":
+				conn.instances.filter(InstanceIds=[options["--plug"]]).stop(Force=True)
+				logger.debug("Called StopInstance API call for %s", options["--plug"])
+			else:
+				logger.debug("Skipping fencing as instance is not in running status")
+		elif (options["--action"]=="on"):
+			conn.instances.filter(InstanceIds=[options["--plug"]]).start()
+	except Exception as e:
+		logger.debug("Failed to power %s %s: %s", \
+					 options["--action"], options["--plug"], e)
+		fail(EC_STATUS)
 
 def define_new_opts():
-	all_opt["lanplus"] = {
-		"getopt" : "P",
-		"longopt" : "lanplus",
-		"help" : "-P, --lanplus                  Use Lanplus to improve security of connection",
+	all_opt["zone"] = {
+		"getopt" : "z:",
+		"longopt" : "zone",
+		"help" : "-z, --zone=[zone]          Zone, e.g. zone name",
+		"shortdesc" : "Zone.",
 		"required" : "0",
-		"default" : "0",
-		"shortdesc" : "Use Lanplus to improve security of connection",
-		"order": 1
+		"order" : 2
 	}
-	all_opt["auth"] = {
-		"getopt" : "A:",
-		"longopt" : "auth",
-		"help" : "-A, --auth=[auth]              IPMI Lan Auth type (md5|password|none)",
+	all_opt["api_protocol"] = {
+		"getopt" : "ap:",
+		"longopt" : "api_protocol",
+		"help" : "-ap, --api_protocol=[api_protocol]          api protocol, e.g. api protocol",
+		"shortdesc" : "Zone.",
 		"required" : "0",
-		"shortdesc" : "IPMI Lan Auth type.",
-		"choices" : ["md5", "password", "none"],
-		"order": 1
+		"order" : 3
 	}
-	all_opt["cipher"] = {
-		"getopt" : "C:",
-		"longopt" : "cipher",
-		"help" : "-C, --cipher=[cipher]          Ciphersuite to use (same as ipmitool -C parameter)",
+	all_opt["api_key"] = {
+		"getopt" : "ak:",
+		"longopt" : "api-key",
+		"help" : "-a, --api-key=[key]         API Key",
+		"shortdesc" : "API Key.",
 		"required" : "0",
-		"shortdesc" : "Ciphersuite to use (same as ipmitool -C parameter)",
-		"order": 1
+		"order" : 4
 	}
-	all_opt["privlvl"] = {
-		"getopt" : "L:",
-		"longopt" : "privlvl",
-		"help" : "-L, --privlvl=[level]          "
-				 "Privilege level on IPMI device (callback|user|operator|administrator)",
+	all_opt["secret_key"] = {
+		"getopt" : "sk:",
+		"longopt" : "secret-key",
+		"help" : "-s, --secret-key=[key]         Secret Key",
+		"shortdesc" : "Secret Key.",
 		"required" : "0",
-		"shortdesc" : "Privilege level on IPMI device",
-		"default" : "administrator",
-		"choices" : ["callback", "user", "operator", "administrator"],
-		"order": 1
+		"order" : 5
 	}
-	all_opt["ipmitool_path"] = {
+	all_opt["filter"] = {
 		"getopt" : ":",
-		"longopt" : "ipmitool-path",
-		"help" : "--ipmitool-path=[path]         Path to ipmitool binary",
-		"required" : "0",
-		"shortdesc" : "Path to ipmitool binary",
-		"default" : "@IPMITOOL_PATH@",
-		"order": 200
+		"longopt" : "filter",
+		"help" : "--filter=[key=value]           Filter (e.g. vpc-id=[vpc-XXYYZZAA]",
+		"shortdesc": "Filter for list-action",
+		"required": "0",
+		"order": 6
 	}
-	all_opt["ipmitool_timeout"] = {
-		"getopt" : ":",
-		"longopt" : "ipmitool-timeout",
-		"help" : "--ipmitool-timeout=[timeout]         Timeout (sec) for IPMI operation",
-		"required" : "0",
-		"shortdesc" : "Timeout (sec) for IPMI operation",
-		"default" : "2",
-		"order": 201
+	all_opt["boto3_debug"] = {
+		"getopt" : "b:",
+		"longopt" : "boto3_debug",
+		"help" : "-b, --boto3_debug=[option]     Boto3 and Botocore library debug logging",
+		"shortdesc": "Boto Lib debug",
+		"required": "0",
+		"default": "False",
+		"order": 7
 	}
-	all_opt["target"] = {
-		"getopt" : ":",
-		"longopt" : "target",
-		"help" : "--target=[targetaddress]       Bridge IPMI requests to the remote target address",
-		"required" : "0",
-		"shortdesc" : "Bridge IPMI requests to the remote target address",
-		"order": 1
-	}
-	all_opt["hexadecimal_kg"] = {
-		"getopt" : ":",
-		"longopt" : "hexadecimal-kg",
-		"help" : "--hexadecimal-kg=[key]         Hexadecimal-encoded Kg key for IPMIv2 authentication",
-		"required" : "0",
-		"shortdesc" : "Hexadecimal-encoded Kg key for IPMIv2 authentication",
-		"order": 1
+	all_opt["skip_race_check"] = {
+		"getopt" : "",
+		"longopt" : "skip-race-check",
+		"help" : "--skip-race-check              Skip race condition check",
+		"shortdesc": "Skip race condition check",
+		"required": "0",
+		"order": 8
 	}
 
+# Main agent method
 def main():
+	conn = None
+
+	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_ip", "filter", "boto3_debug", "skip_race_check"]
+
 	atexit.register(atexit_handler)
 
-	device_opt = ["ipaddr", "login", "no_login", "no_password", "passwd",
-				  "diag", "lanplus", "auth", "cipher", "privlvl", "sudo",
-				  "ipmitool_path", "ipmitool_timeout", "method", "target", "hexadecimal_kg"]
 	define_new_opts()
 
-	all_opt["power_wait"]["default"] = 2
-	if os.path.basename(sys.argv[0]) == "fence_ilo3":
-		all_opt["power_wait"]["default"] = "4"
-		all_opt["lanplus"]["default"] = "1"
-	elif os.path.basename(sys.argv[0]) == "fence_ilo4":
-		all_opt["lanplus"]["default"] = "1"
-	elif os.path.basename(sys.argv[0]) == "fence_ilo5":
-		all_opt["lanplus"]["default"] = "1"
-	elif os.path.basename(sys.argv[0]) == "fence_ipmilanplus":
-		all_opt["lanplus"]["default"] = "1"
-
-	all_opt["ipport"]["default"] = "623"
-	all_opt["method"]["help"] = "-m, --method=[method]          Method to fence (onoff|cycle) (Default: onoff)\n" \
-								"WARNING! This fence agent might report success before the node is powered off. " \
-								"You should use -m/method onoff if your fence device works correctly with that option."
+	all_opt["power_timeout"]["default"] = "60"
 
 	options = check_input(device_opt, process_input(device_opt))
 
 	docs = {}
-	docs["shortdesc"] = "Fence agent for MOLD (IPMI TEST)"
-	docs["longdesc"] = "{} is a Power Fencing agent MOLD (IPMI TEST) \
-which can be used with machines controlled by IPMI. \
-This agent calls support software ipmitool (http://ipmitool.sf.net/). \
-WARNING! This fence agent might report success before the node is powered off. \
-You should use -m/method onoff if your fence device works correctly with that option.".format(os.path.basename(__file__))
-	docs["vendorurl"] = ""
-	docs["symlink"] = [("fence_ilo3", "Fence agent for HP iLO3"),
-					   ("fence_ilo4", "Fence agent for HP iLO4"),
-					   ("fence_ilo5", "Fence agent for HP iLO5"),
-					   ("fence_ipmilanplus", "Fence agent for IPMIv2 lanplus"),
-					   ("fence_imm", "Fence agent for IBM Integrated Management Module"),
-					   ("fence_idrac", "Fence agent for Dell iDRAC")]
+	docs["shortdesc"] = "Fence agent for MOLD"
+	docs["longdesc"] = "fence_mold is a Power Fencing agent for AWS (Amazon Web\
+\n.P\n\
+"
+	docs["vendorurl"] = "http://www.amazon.com"
 	show_docs(options, docs)
 
 	run_delay(options)
 
-	if not is_executable(options["--ipmitool-path"]):
-		fail_usage("Ipmitool not found or not accessible")
+	# if "--debug-file" in options:
+	# 	for handler in logger.handlers:
+	# 		if isinstance(handler, logging.FileHandler):
+	# 			logger.removeHandler(handler)
+	# 	lh = logging.FileHandler(options["--debug-file"])
+	# 	logger.addHandler(lh)
+	# 	lhf = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+	# 	lh.setFormatter(lhf)
+	# 	lh.setLevel(logging.DEBUG)
+	#
+	# if options["--boto3_debug"].lower() not in ["1", "yes", "on", "true"]:
+	# 	boto3.set_stream_logger('boto3',logging.INFO)
+	# 	boto3.set_stream_logger('botocore',logging.CRITICAL)
+	# 	logging.getLogger('botocore').propagate = False
+	# 	logging.getLogger('boto3').propagate = False
+	# else:
+	# 	log_format = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
+	# 	logging.getLogger('botocore').propagate = False
+	# 	logging.getLogger('boto3').propagate = False
+	# 	fdh = logging.FileHandler('/var/log/fence_aws_boto3.log')
+	# 	fdh.setFormatter(log_format)
+	# 	logging.getLogger('boto3').addHandler(fdh)
+	# 	logging.getLogger('botocore').addHandler(fdh)
+	# 	logging.debug("Boto debug level is %s and sending debug info to /var/log/fence_aws_boto3.log", options["--boto3_debug"])
 
-	reboot_fn = reboot_cycle
-	if options["--action"] == "diag":
-		# Diag is a special action that can't be verified so we will reuse reboot functionality
-		# to minimize impact on generic library
-		options["--action"] = "reboot"
-		options["--method"] = "cycle"
-		reboot_fn = reboot_diag
+	zone = options.get("--zone")
+	api_key = options.get("--api-key")
+	secret_key = options.get("--secret-key")
+	try:
+		conn = boto3.resource('ec2', region_name=zone,
+							  mold_api_key_id=api_key,
+							  mold_secret_api_key=secret_key)
+	except Exception as e:
+		fail_usage("Failed: Unable to connect to AWS: " + str(e))
 
-	result = fence_action(None, options, set_power_status, get_power_status, None, reboot_fn)
+	# Operate the fencing device
+	result = fence_action(conn, options, set_power_status, get_power_status, get_nodes_list)
 	sys.exit(result)
 
 if __name__ == "__main__":

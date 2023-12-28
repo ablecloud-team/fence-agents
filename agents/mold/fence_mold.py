@@ -147,7 +147,7 @@ def define_new_opts():
 		"getopt" : "ap:",
 		"longopt" : "api_protocol",
 		"help" : "-ap, --api-protocol=[api-protocol]          api protocol, e.g. api protocol",
-		"shortdesc" : "Zone.",
+		"shortdesc" : "API Protocol.",
 		"required" : "0",
 		"order" : 3
 	}

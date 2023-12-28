@@ -1,8 +1,14 @@
 #!/usr/bin/python3 -tt
-
+import base64
+import hashlib
+import hmac
+import json
+import ssl
 import sys, re
 import logging
 import atexit
+import urllib
+
 sys.path.append("/usr/share/fence")
 from fencing import *
 from fencing import fail, fail_usage, run_delay, EC_STATUS, SyslogLibHandler
@@ -10,35 +16,23 @@ from fencing import fail, fail_usage, run_delay, EC_STATUS, SyslogLibHandler
 import requests
 from requests import HTTPError
 
-try:
-	import boto3
-	from botocore.exceptions import ConnectionError, ClientError, EndpointConnectionError, NoRegionError
-except ImportError:
-	pass
-
-logger = logging.getLogger()
-logger.propagate = False
-logger.setLevel(logging.INFO)
-logger.addHandler(SyslogLibHandler())
-logging.getLogger('botocore.vendored').propagate = False
-
 def get_instance_id(options):
 	try:
 		token = requests.put('http://169.254.169.254/latest/api/token', headers={"X-aws-ec2-metadata-token-ttl-seconds" : "21600"}).content.decode("UTF-8")
 		r = requests.get('http://169.254.169.254/latest/meta-data/instance-id', headers={"X-aws-ec2-metadata-token" : token}).content.decode("UTF-8")
 		return r
 	except HTTPError as http_err:
-		logger.error('HTTP error occurred while trying to access EC2 metadata server: %s', http_err)
+		logging('HTTP error occurred while trying to access EC2 metadata server: %s', http_err)
 	except Exception as err:
 		if "--skip-race-check" not in options:
-			logger.error('A fatal error occurred while trying to access EC2 metadata server: %s', err)
+			logging('A fatal error occurred while trying to access EC2 metadata server: %s', err)
 		else:
-			logger.debug('A fatal error occurred while trying to access EC2 metadata server: %s', err)
+			logging('A fatal error occurred while trying to access EC2 metadata server: %s', err)
 	return None
 
 
 def get_nodes_list(conn, options):
-	logger.debug("Starting monitor operation")
+	logging("Starting monitor operation")
 	result = {}
 	try:
 		if "--filter" in options:
@@ -50,15 +44,11 @@ def get_nodes_list(conn, options):
 		else:
 			for instance in conn.instances.all():
 				result[instance.id] = ("", None)
-	except ClientError:
-		fail_usage("Failed: Incorrect API Key or Secret Key.")
-	except EndpointConnectionError:
-		fail_usage("Failed: Incorrect Zone.")
 	except ConnectionError as e:
-		fail_usage("Failed: Unable to connect to MOLD: " + str(e))
+		fail_usage("Failed: Unable to connect to AWS: " + str(e))
 	except Exception as e:
-		logger.error("Failed to get node list: %s", e)
-	logger.debug("Monitor operation OK: %s",result)
+		logging.error("Failed to get node list: %s", e)
+	logging.debug("Monitor operation OK: %s",result)
 	return result
 
 def excuteApi(request, args):
@@ -93,12 +83,12 @@ def listVirtualMachines(args):
 	print(state_value)
 
 def get_power_status(conn, options):
-	logger.debug("Starting status operation")
+	fail_usage("Starting status operation")
 	try:
 		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [options["--plug"]]}])
 		state = list(instance)[0].state["Name"]
 
-		logger.debug("Status operation for EC2 instance %s returned state: %s",options["--plug"],state.upper())
+		logging("Status operation for EC2 instance %s returned state: %s",options["--plug"],state.upper())
 		if state == "running":
 			return "on"
 		elif state == "stopped":
@@ -106,14 +96,10 @@ def get_power_status(conn, options):
 		else:
 			return "unknown"
 
-	except ClientError:
-		fail_usage("Failed: Incorrect API Key or Secret Key.")
-	except EndpointConnectionError:
-		fail_usage("Failed: Incorrect Zone.")
 	except IndexError:
 		fail(EC_STATUS)
 	except Exception as e:
-		logger.error("Failed to get power status: %s", e)
+		fail_usage("Failed to get power status: %s", e)
 		fail(EC_STATUS)
 
 def get_self_power_status(conn, instance_id):
@@ -122,15 +108,12 @@ def get_self_power_status(conn, instance_id):
 		state = list(instance)[0].state["Name"]
 
 		if state == "running":
-			logger.debug("Captured my (%s) state and it %s - returning OK - Proceeding with fencing",instance_id,state.upper())
+			logging("Captured my (%s) state and it %s - returning OK - Proceeding with fencing",instance_id,state.upper())
 			return "ok"
 		else:
-			logger.debug("Captured my (%s) state it is %s - returning Alert - Unable to fence other nodes",instance_id,state.upper())
+			logging.debug("Captured my (%s) state it is %s - returning Alert - Unable to fence other nodes",instance_id,state.upper())
 			return "alert"
 
-	except ClientError:
-		fail_usage("Failed: Incorrect API Key or Secret Key.")
-	except EndpointConnectionError:
 		fail_usage("Failed: Incorrect Zone.")
 	except IndexError:
 		return "fail"
@@ -141,13 +124,13 @@ def set_power_status(conn, options):
 		if (options["--action"]=="off"):
 			if "--skip-race-check" in options or get_self_power_status(conn,my_instance) == "ok":
 				conn.instances.filter(InstanceIds=[options["--plug"]]).stop(Force=True)
-				logger.debug("Called StopInstance API call for %s", options["--plug"])
+				logging.debug("Called StopInstance API call for %s", options["--plug"])
 			else:
-				logger.debug("Skipping fencing as instance is not in running status")
+				logging.debug("Skipping fencing as instance is not in running status")
 		elif (options["--action"]=="on"):
 			conn.instances.filter(InstanceIds=[options["--plug"]]).start()
 	except Exception as e:
-		logger.debug("Failed to power %s %s: %s", \
+		logging.debug("Failed to power %s %s: %s", \
 					 options["--action"], options["--plug"], e)
 		fail(EC_STATUS)
 
@@ -163,14 +146,14 @@ def define_new_opts():
 	all_opt["api_protocol"] = {
 		"getopt" : "ap:",
 		"longopt" : "api_protocol",
-		"help" : "-ap, --api_protocol=[api_protocol]          api protocol, e.g. api protocol",
+		"help" : "-ap, --api-protocol=[api-protocol]          api protocol, e.g. api protocol",
 		"shortdesc" : "Zone.",
 		"required" : "0",
 		"order" : 3
 	}
 	all_opt["api_key"] = {
 		"getopt" : "ak:",
-		"longopt" : "api-key",
+		"longopt" : "api_key",
 		"help" : "-a, --api-key=[key]         API Key",
 		"shortdesc" : "API Key.",
 		"required" : "0",
@@ -178,19 +161,27 @@ def define_new_opts():
 	}
 	all_opt["secret_key"] = {
 		"getopt" : "sk:",
-		"longopt" : "secret-key",
+		"longopt" : "secret_key",
 		"help" : "-s, --secret-key=[key]         Secret Key",
 		"shortdesc" : "Secret Key.",
 		"required" : "0",
 		"order" : 5
 	}
+	all_opt["vm_id"] = {
+		"getopt" : "vmid:",
+		"longopt" : "vm_id",
+		"help" : "-vi, --vm-ip=[key]         VM-IP",
+		"shortdesc" : "VM IP.",
+		"required" : "0",
+		"order" : 6
+    }
 	all_opt["filter"] = {
 		"getopt" : ":",
 		"longopt" : "filter",
 		"help" : "--filter=[key=value]           Filter (e.g. vpc-id=[vpc-XXYYZZAA]",
 		"shortdesc": "Filter for list-action",
 		"required": "0",
-		"order": 6
+		"order": 7
 	}
 	all_opt["boto3_debug"] = {
 		"getopt" : "b:",
@@ -199,7 +190,7 @@ def define_new_opts():
 		"shortdesc": "Boto Lib debug",
 		"required": "0",
 		"default": "False",
-		"order": 7
+		"order": 8
 	}
 	all_opt["skip_race_check"] = {
 		"getopt" : "",
@@ -207,14 +198,14 @@ def define_new_opts():
 		"help" : "--skip-race-check              Skip race condition check",
 		"shortdesc": "Skip race condition check",
 		"required": "0",
-		"order": 8
+		"order": 9
 	}
 
 # Main agent method
 def main():
 	conn = None
 
-	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_ip", "filter", "boto3_debug", "skip_race_check"]
+	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "filter", "boto3_debug", "skip_race_check"]
 
 	atexit.register(atexit_handler)
 
@@ -226,10 +217,10 @@ def main():
 
 	docs = {}
 	docs["shortdesc"] = "Fence agent for MOLD"
-	docs["longdesc"] = "fence_mold is a Power Fencing agent for AWS (Amazon Web\
+	docs["longdesc"] = "fence_mold is a Power Fencing agent for MOLD\
 \n.P\n\
 "
-	docs["vendorurl"] = "http://www.amazon.com"
+	docs["vendorurl"] = "http://www.ablecloud.io"
 	show_docs(options, docs)
 
 	run_delay(options)
@@ -262,15 +253,18 @@ def main():
 	zone = options.get("--zone")
 	api_key = options.get("--api-key")
 	secret_key = options.get("--secret-key")
+
 	try:
-		conn = boto3.resource('ec2', region_name=zone,
-							  mold_api_key_id=api_key,
-							  mold_secret_api_key=secret_key)
+		conn = None
 	except Exception as e:
 		fail_usage("Failed: Unable to connect to AWS: " + str(e))
 
 	# Operate the fencing device
+	print("==================================================================")
+	print("==================================================================")
+	print("==================================================================")
 	result = fence_action(conn, options, set_power_status, get_power_status, get_nodes_list)
+	print(result)
 	sys.exit(result)
 
 if __name__ == "__main__":

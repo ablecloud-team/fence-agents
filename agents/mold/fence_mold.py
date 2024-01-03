@@ -86,9 +86,38 @@ def getVirtualMachinesStatus(options):
 	# API 호출
 	syslog.syslog(syslog.LOG_INFO, str(options))
 	result = excuteApi(request, options)
-	# syslog.syslog(syslog.LOG_INFO, str(result))
 	data = json.loads(result)
 	state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
+	return str(state_value)
+
+def setVirtualMachinesStop(options):
+	# reqest 세팅
+	request={}
+	request['command']='stopVirtualMachine'
+	request['id']=options.get("--vm_id")
+	request['response']='json'
+	request['apikey']=options.get("--api_key")
+
+	# API 호출
+	syslog.syslog(syslog.LOG_INFO, str(options))
+	result = excuteApi(request, options)
+	data = json.loads(result)
+	state_value = data['stopvirtualmachineresponse']['jobid']
+	return str(state_value)
+
+def setVirtualMachinesStart(options):
+	# reqest 세팅
+	request={}
+	request['command']='startVirtualMachine'
+	request['id']=options.get("--vm_id")
+	request['response']='json'
+	request['apikey']=options.get("--api_key")
+
+	# API 호출
+	syslog.syslog(syslog.LOG_INFO, str(options))
+	result = excuteApi(request, options)
+	data = json.loads(result)
+	state_value = data['startvirtualmachineresponse']['jobid']
 	return str(state_value)
 
 def get_power_status(_, options):
@@ -120,17 +149,14 @@ def get_self_power_status(conn, instance_id):
 	except IndexError:
 		return "fail"
 
-def set_power_status(conn, options):
-	my_instance = get_instance_id(options)
+def set_power_status(_, options):
 	try:
 		if (options["--action"]=="off"):
-			if "--skip-race-check" in options or get_self_power_status(conn,my_instance) == "ok":
-				conn.instances.filter(InstanceIds=[options["--plug"]]).stop(Force=True)
-				logging.debug("Called StopInstance API call for %s", options["--plug"])
-			else:
-				logging.debug("Skipping fencing as instance is not in running status")
+			syslog.syslog(syslog.LOG_INFO, 'VirtualMachinesStop=============================================')
+			setVirtualMachinesStop(options)
 		elif (options["--action"]=="on"):
-			conn.instances.filter(InstanceIds=[options["--plug"]]).start()
+			syslog.syslog(syslog.LOG_INFO, 'VirtualMachinesStart=============================================')
+			setVirtualMachinesStart(options)
 	except Exception as e:
 		logging.debug("Failed to power %s %s: %s", \
 					 options["--action"], options["--plug"], e)

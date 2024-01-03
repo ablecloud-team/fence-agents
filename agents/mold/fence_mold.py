@@ -4,14 +4,15 @@ import hashlib
 import hmac
 import json
 import ssl
-import sys, re
+import sys
 import logging
 import atexit
+import syslog
 import urllib
 
 sys.path.append("/usr/share/fence")
 from fencing import *
-from fencing import fail, fail_usage, run_delay, EC_STATUS, SyslogLibHandler
+from fencing import fail, fail_usage, run_delay, EC_STATUS, run_command, SyslogLibHandler
 
 import requests
 from requests import HTTPError
@@ -51,10 +52,16 @@ def get_nodes_list(conn, options):
 	logging.debug("Monitor operation OK: %s",result)
 	return result
 
-def excuteApi(request, args):
-	secretkey=args.secretkey
+def excuteApi(request, options):
+	api_protocol = options.get("--api_protocol")
+	m_ip = options.get("--m_ip")
+	m_port = options.get("--m_port")
+	secret_key = options.get("--secret_key")
+	secretkey=secret_key
 
-	baseurl=args.api_protocol+'://'+args.ip_address+':'+args.port+'/client/api?'
+	baseurl=str(api_protocol)+'://'+str(m_ip)+':'+str(m_port)+'/client/api?'
+	syslog.syslog(syslog.LOG_INFO, '222222=============================================')
+	syslog.syslog(syslog.LOG_INFO, baseurl)
 	request_str='&'.join(['='.join([k,urllib.parse.quote_plus(request[k])]) for k in request.keys()])
 	sig_str='&'.join(['='.join([k.lower(),urllib.parse.quote_plus(request[k]).lower().replace('+','%20')])for k in sorted(request)])
 	sig=hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256)
@@ -68,42 +75,37 @@ def excuteApi(request, args):
 	res=urllib.request.urlopen(req, context=context)
 	return res.read().decode()
 
-def listVirtualMachines(args):
+def getVirtualMachinesStatus(options):
 	# reqest 세팅
 	request={}
-	request['command']=args.command
-	request['id']=args.vmid
+	request['command']='listVirtualMachines'
+	request['id']=options.get("--vm_id")
 	request['response']='json'
-	request['apikey']=args.apikey
+	request['apikey']=options.get("--api_key")
 
 	# API 호출
-	result = excuteApi(request, args)
+	syslog.syslog(syslog.LOG_INFO, str(options))
+	result = excuteApi(request, options)
+	# syslog.syslog(syslog.LOG_INFO, str(result))
 	data = json.loads(result)
 	state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
-	print(state_value)
+	return str(state_value)
 
-def get_power_status(conn, options):
-	fail_usage("Starting status operation")
-	try:
-		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [options["--plug"]]}])
-		state = list(instance)[0].state["Name"]
+def get_power_status(_, options):
 
-		logging("Status operation for EC2 instance %s returned state: %s",options["--plug"],state.upper())
-		if state == "running":
-			return "on"
-		elif state == "stopped":
-			return "off"
-		else:
-			return "unknown"
-
-	except IndexError:
-		fail(EC_STATUS)
-	except Exception as e:
-		fail_usage("Failed to get power status: %s", e)
-		fail(EC_STATUS)
+	state = getVirtualMachinesStatus(options)
+	syslog.syslog(syslog.LOG_INFO, '1111=============================================')
+	# state = "stopped"
+	if state == "Running":
+		return "on"
+	elif state == "Stopped":
+		return "off"
+	else:
+		return "unknown"
 
 def get_self_power_status(conn, instance_id):
 	try:
+		syslog.syslog(syslog.LOG_INFO, '1212121=============================================')
 		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [instance_id]}])
 		state = list(instance)[0].state["Name"]
 
@@ -134,11 +136,16 @@ def set_power_status(conn, options):
 					 options["--action"], options["--plug"], e)
 		fail(EC_STATUS)
 
+
+def reboot_cycle(_, options):
+	(status, _, _) = run_command(options, create_command(options, "cycle"))
+	return not bool(status)
+
 def define_new_opts():
 	all_opt["zone"] = {
 		"getopt" : "z:",
 		"longopt" : "zone",
-		"help" : "-z, --zone=[zone]          Zone, e.g. zone name",
+		"help" : "-z, --zone=[zone]          Zone, e.g. zone1",
 		"shortdesc" : "Zone.",
 		"required" : "0",
 		"order" : 2
@@ -146,7 +153,7 @@ def define_new_opts():
 	all_opt["api_protocol"] = {
 		"getopt" : "ap:",
 		"longopt" : "api_protocol",
-		"help" : "-ap, --api-protocol=[api-protocol]          api protocol, e.g. api protocol",
+		"help" : "-ap, --api-protocol=[api-protocol]          Api protocol, e.g. http",
 		"shortdesc" : "API Protocol.",
 		"required" : "0",
 		"order" : 3
@@ -162,7 +169,7 @@ def define_new_opts():
 	all_opt["secret_key"] = {
 		"getopt" : "sk:",
 		"longopt" : "secret_key",
-		"help" : "-s, --secret-key=[key]         Secret Key",
+		"help" : "-s, --secret_key=[key]         Secret Key",
 		"shortdesc" : "Secret Key.",
 		"required" : "0",
 		"order" : 5
@@ -170,47 +177,36 @@ def define_new_opts():
 	all_opt["vm_id"] = {
 		"getopt" : "vmid:",
 		"longopt" : "vm_id",
-		"help" : "-vi, --vm-ip=[key]         VM-IP",
-		"shortdesc" : "VM IP.",
+		"help" : "-vi, --vm-id=[option]      VM-ID",
+		"shortdesc" : "VM ID.",
 		"required" : "0",
 		"order" : 6
-    }
-	all_opt["filter"] = {
-		"getopt" : ":",
-		"longopt" : "filter",
-		"help" : "--filter=[key=value]           Filter (e.g. vpc-id=[vpc-XXYYZZAA]",
-		"shortdesc": "Filter for list-action",
-		"required": "0",
-		"order": 7
 	}
-	all_opt["boto3_debug"] = {
-		"getopt" : "b:",
-		"longopt" : "boto3_debug",
-		"help" : "-b, --boto3_debug=[option]     Boto3 and Botocore library debug logging",
-		"shortdesc": "Boto Lib debug",
-		"required": "0",
-		"default": "False",
-		"order": 8
+	all_opt["m_ip"] = {
+		"getopt" : "mip:",
+		"longopt" : "m_ip",
+		"help" : "-mip, --mip=[mip]          MOLD Ip Address",
+		"shortdesc" : "MOLD IP Address.",
+		"required" : "0",
+		"order" : 7
 	}
-	all_opt["skip_race_check"] = {
-		"getopt" : "",
-		"longopt" : "skip-race-check",
-		"help" : "--skip-race-check              Skip race condition check",
-		"shortdesc": "Skip race condition check",
-		"required": "0",
-		"order": 9
+	all_opt["m_port"] = {
+		"getopt" : "mpt:",
+		"longopt" : "m_port",
+		"help" : "-mpt, --mport=[mport]      MOLD Port",
+		"shortdesc" : "MOLD PORT.",
+		"required" : "0",
+		"order" : 8
 	}
 
 # Main agent method
 def main():
 	conn = None
 
-	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "filter", "boto3_debug", "skip_race_check"]
-
+	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "m_ip", "m_port"]
 	atexit.register(atexit_handler)
 
 	define_new_opts()
-
 	all_opt["power_timeout"]["default"] = "60"
 
 	options = check_input(device_opt, process_input(device_opt))
@@ -225,46 +221,11 @@ def main():
 
 	run_delay(options)
 
-	# if "--debug-file" in options:
-	# 	for handler in logger.handlers:
-	# 		if isinstance(handler, logging.FileHandler):
-	# 			logger.removeHandler(handler)
-	# 	lh = logging.FileHandler(options["--debug-file"])
-	# 	logger.addHandler(lh)
-	# 	lhf = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-	# 	lh.setFormatter(lhf)
-	# 	lh.setLevel(logging.DEBUG)
-	#
-	# if options["--boto3_debug"].lower() not in ["1", "yes", "on", "true"]:
-	# 	boto3.set_stream_logger('boto3',logging.INFO)
-	# 	boto3.set_stream_logger('botocore',logging.CRITICAL)
-	# 	logging.getLogger('botocore').propagate = False
-	# 	logging.getLogger('boto3').propagate = False
-	# else:
-	# 	log_format = logging.Formatter('%(asctime)s %(name)-12s %(levelname)-8s %(message)s')
-	# 	logging.getLogger('botocore').propagate = False
-	# 	logging.getLogger('boto3').propagate = False
-	# 	fdh = logging.FileHandler('/var/log/fence_aws_boto3.log')
-	# 	fdh.setFormatter(log_format)
-	# 	logging.getLogger('boto3').addHandler(fdh)
-	# 	logging.getLogger('botocore').addHandler(fdh)
-	# 	logging.debug("Boto debug level is %s and sending debug info to /var/log/fence_aws_boto3.log", options["--boto3_debug"])
-
-	zone = options.get("--zone")
-	api_key = options.get("--api-key")
-	secret_key = options.get("--secret-key")
-
-	try:
-		conn = None
-	except Exception as e:
-		fail_usage("Failed: Unable to connect to AWS: " + str(e))
-
 	# Operate the fencing device
-	print("==================================================================")
-	print("==================================================================")
-	print("==================================================================")
-	result = fence_action(conn, options, set_power_status, get_power_status, get_nodes_list)
-	print(result)
+	syslog.syslog(syslog.LOG_INFO, '**00000=============================================')
+	result = fence_action(None, options, set_power_status, get_power_status, None)
+	syslog.syslog(syslog.LOG_INFO, str(result))
+	syslog.syslog(syslog.LOG_INFO, '**11111=============================================')
 	sys.exit(result)
 
 if __name__ == "__main__":

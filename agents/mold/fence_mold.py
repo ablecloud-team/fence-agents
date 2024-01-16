@@ -14,6 +14,9 @@ sys.path.append("/usr/share/fence")
 from fencing import *
 from fencing import fail, fail_usage, run_delay, EC_STATUS, run_command, SyslogLibHandler
 
+import requests
+from requests import HTTPError
+
 def excuteApi(request, options):
 	api_protocol = options.get("--api_protocol")
 	m_ip = options.get("--m_ip")
@@ -174,8 +177,6 @@ def define_new_opts():
 
 # Main agent method
 def main():
-	conn = None
-
 	device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "m_ip", "m_port"]
 	atexit.register(atexit_handler)
 

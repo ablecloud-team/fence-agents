@@ -14,44 +14,6 @@ sys.path.append("/usr/share/fence")
 from fencing import *
 from fencing import fail, fail_usage, run_delay, EC_STATUS, run_command, SyslogLibHandler
 
-import requests
-from requests import HTTPError
-
-def get_instance_id(options):
-	try:
-		token = requests.put('http://169.254.169.254/latest/api/token', headers={"X-aws-ec2-metadata-token-ttl-seconds" : "21600"}).content.decode("UTF-8")
-		r = requests.get('http://169.254.169.254/latest/meta-data/instance-id', headers={"X-aws-ec2-metadata-token" : token}).content.decode("UTF-8")
-		return r
-	except HTTPError as http_err:
-		logging('HTTP error occurred while trying to access EC2 metadata server: %s', http_err)
-	except Exception as err:
-		if "--skip-race-check" not in options:
-			logging('A fatal error occurred while trying to access EC2 metadata server: %s', err)
-		else:
-			logging('A fatal error occurred while trying to access EC2 metadata server: %s', err)
-	return None
-
-
-def get_nodes_list(conn, options):
-	logging("Starting monitor operation")
-	result = {}
-	try:
-		if "--filter" in options:
-			filter_key   = options["--filter"].split("=")[0].strip()
-			filter_value = options["--filter"].split("=")[1].strip()
-			filter = [{ "Name": filter_key, "Values": [filter_value] }]
-			for instance in conn.instances.filter(Filters=filter):
-				result[instance.id] = ("", None)
-		else:
-			for instance in conn.instances.all():
-				result[instance.id] = ("", None)
-	except ConnectionError as e:
-		fail_usage("Failed: Unable to connect to AWS: " + str(e))
-	except Exception as e:
-		logging.error("Failed to get node list: %s", e)
-	logging.debug("Monitor operation OK: %s",result)
-	return result
-
 def excuteApi(request, options):
 	api_protocol = options.get("--api_protocol")
 	m_ip = options.get("--m_ip")
@@ -84,6 +46,7 @@ def getVirtualMachinesStatus(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
+	syslog.syslog(syslog.LOG_INFO, 'collecting at getVirtualMachinesStatus')
 	syslog.syslog(syslog.LOG_INFO, str(options))
 	result = excuteApi(request, options)
 	data = json.loads(result)
@@ -99,6 +62,7 @@ def setVirtualMachinesStop(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
+	syslog.syslog(syslog.LOG_INFO, 'collecting at setVirtualMachinesStop')
 	syslog.syslog(syslog.LOG_INFO, str(options))
 	result = excuteApi(request, options)
 	data = json.loads(result)
@@ -114,6 +78,7 @@ def setVirtualMachinesStart(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
+	syslog.syslog(syslog.LOG_INFO, 'collecting at setVirtualMachinesStart')
 	syslog.syslog(syslog.LOG_INFO, str(options))
 	result = excuteApi(request, options)
 	data = json.loads(result)
@@ -121,10 +86,8 @@ def setVirtualMachinesStart(options):
 	return str(state_value)
 
 def get_power_status(_, options):
-
 	state = getVirtualMachinesStatus(options)
 	syslog.syslog(syslog.LOG_INFO, '1111=============================================')
-	# state = "stopped"
 	if state == "Running":
 		return "on"
 	elif state == "Stopped":
@@ -132,26 +95,10 @@ def get_power_status(_, options):
 	else:
 		return "unknown"
 
-def get_self_power_status(conn, instance_id):
-	try:
-		syslog.syslog(syslog.LOG_INFO, '1212121=============================================')
-		instance = conn.instances.filter(Filters=[{"Name": "instance-id", "Values": [instance_id]}])
-		state = list(instance)[0].state["Name"]
-
-		if state == "running":
-			logging("Captured my (%s) state and it %s - returning OK - Proceeding with fencing",instance_id,state.upper())
-			return "ok"
-		else:
-			logging.debug("Captured my (%s) state it is %s - returning Alert - Unable to fence other nodes",instance_id,state.upper())
-			return "alert"
-
-		fail_usage("Failed: Incorrect Zone.")
-	except IndexError:
-		return "fail"
 
 def set_power_status(_, options):
 	try:
-		if (options["--action"]=="off"):
+		if (options["--action"]=="off" or get_power_status(_, options) == "off"):
 			syslog.syslog(syslog.LOG_INFO, 'VirtualMachinesStop=============================================')
 			setVirtualMachinesStop(options)
 		elif (options["--action"]=="on"):

@@ -25,8 +25,6 @@ def excuteApi(request, options):
 	secretkey=secret_key
 
 	baseurl=str(api_protocol)+'://'+str(m_ip)+':'+str(m_port)+'/client/api?'
-	syslog.syslog(syslog.LOG_INFO, '222222=============================================')
-	syslog.syslog(syslog.LOG_INFO, baseurl)
 	request_str='&'.join(['='.join([k,urllib.parse.quote_plus(request[k])]) for k in request.keys()])
 	sig_str='&'.join(['='.join([k.lower(),urllib.parse.quote_plus(request[k]).lower().replace('+','%20')])for k in sorted(request)])
 	sig=hmac.new(secretkey.encode('utf-8'),sig_str.encode('utf-8'),hashlib.sha256)
@@ -49,8 +47,6 @@ def getVirtualMachinesStatus(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
-	syslog.syslog(syslog.LOG_INFO, 'collecting at getVirtualMachinesStatus')
-	syslog.syslog(syslog.LOG_INFO, str(options))
 	result = excuteApi(request, options)
 	data = json.loads(result)
 	state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
@@ -65,8 +61,7 @@ def setVirtualMachinesStop(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
-	syslog.syslog(syslog.LOG_INFO, 'collecting at setVirtualMachinesStop')
-	syslog.syslog(syslog.LOG_INFO, str(options))
+	syslog.syslog(syslog.LOG_INFO, 'Set Virtual Machines Stop')
 	result = excuteApi(request, options)
 	data = json.loads(result)
 	state_value = data['stopvirtualmachineresponse']['jobid']
@@ -81,8 +76,7 @@ def setVirtualMachinesStart(options):
 	request['apikey']=options.get("--api_key")
 
 	# API 호출
-	syslog.syslog(syslog.LOG_INFO, 'collecting at setVirtualMachinesStart')
-	syslog.syslog(syslog.LOG_INFO, str(options))
+	syslog.syslog(syslog.LOG_INFO, 'Set Virtual Machines Start')
 	result = excuteApi(request, options)
 	data = json.loads(result)
 	state_value = data['startvirtualmachineresponse']['jobid']
@@ -90,7 +84,6 @@ def setVirtualMachinesStart(options):
 
 def get_power_status(_, options):
 	state = getVirtualMachinesStatus(options)
-	syslog.syslog(syslog.LOG_INFO, '1111=============================================')
 	if state == "Running":
 		return "on"
 	elif state == "Stopped":
@@ -102,10 +95,8 @@ def get_power_status(_, options):
 def set_power_status(_, options):
 	try:
 		if (options["--action"]=="off" or get_power_status(_, options) == "off"):
-			syslog.syslog(syslog.LOG_INFO, 'VirtualMachinesStop=============================================')
 			setVirtualMachinesStop(options)
 		elif (options["--action"]=="on"):
-			syslog.syslog(syslog.LOG_INFO, 'VirtualMachinesStart=============================================')
 			setVirtualMachinesStart(options)
 	except Exception as e:
 		logging.debug("Failed to power %s %s: %s", \
@@ -196,10 +187,7 @@ def main():
 	run_delay(options)
 
 	# Operate the fencing device
-	syslog.syslog(syslog.LOG_INFO, '**00000=============================================')
 	result = fence_action(None, options, set_power_status, get_power_status, None)
-	syslog.syslog(syslog.LOG_INFO, str(result))
-	syslog.syslog(syslog.LOG_INFO, '**11111=============================================')
 	sys.exit(result)
 
 if __name__ == "__main__":

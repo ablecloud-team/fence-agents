@@ -954,25 +954,11 @@ Requires: /usr/bin/ipmitool
 Requires: fence-agents-common = %{version}-%{release}
 BuildArch: noarch
 Obsoletes: fence-agents < 3.1.13
-%description ipmilan
-Fence agents for devices with IPMI interface.
-%files ipmilan
-%{_sbindir}/fence_ipmilan
-%{_mandir}/man8/fence_ipmilan.8*
-%{_sbindir}/fence_idrac
-%{_mandir}/man8/fence_idrac.8*
-%{_sbindir}/fence_ilo3
-%{_mandir}/man8/fence_ilo3.8*
-%{_sbindir}/fence_ilo4
-%{_mandir}/man8/fence_ilo4.8*
-%{_sbindir}/fence_ilo5
-%{_mandir}/man8/fence_ilo5.8*
-%{_sbindir}/fence_ipmilanplus
-%{_mandir}/man8/fence_ipmilanplus.8*
-%{_sbindir}/fence_imm
-%{_mandir}/man8/fence_imm.8*
-
-%ifarch x86_64 ppc64le
+%description mold
+Fence agents for ablestack mold.
+%files mold
+%{_sbindir}/fence_mold
+%{_mandir}/man8/fence_mold.8*
 
 %package ovh
 License: GPL-2.0-or-later AND LGPL-2.0-or-later

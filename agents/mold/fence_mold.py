@@ -3,6 +3,7 @@ import base64
 import hashlib
 import hmac
 import json
+import socket
 import ssl
 import sys
 import logging
@@ -26,22 +27,38 @@ def excuteApi(request, options):
     secret_key = options.get("--secret_key")
     secretkey = secret_key
 
-    baseurl = str(api_protocol) + '://' + str(m_ip) + ':' + str(m_port) + '/client/api?'
-    request_str = '&'.join(['='.join([k, urllib.parse.quote_plus(request[k])]) for k in request.keys()])
-    sig_str = '&'.join(['='.join([k.lower(), urllib.parse.quote_plus(request[k]).lower().replace('+', '%20')]) for k in
-                        sorted(request)])
-    sig = hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256)
-    sig = hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()
-    sig = base64.encodebytes(hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest())
-    sig = base64.encodebytes(
-        hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()).strip()
-    sig = urllib.parse.quote_plus(base64.encodebytes(
-        hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()).strip())
+    # 통신 테스트
+    m_ip = options.get("--m_ip")
+    m_port = options.get("--m_port")
+    sock_result = test_communication(m_ip, m_port)
 
-    req = baseurl + request_str + '&signature=' + sig
-    context = ssl._create_unverified_context()
-    res = urllib.request.urlopen(req, context=context)
-    return res.read().decode()
+    if sock_result:
+        baseurl = str(api_protocol) + '://' + str(m_ip) + ':' + str(m_port) + '/client/api?'
+        request_str = '&'.join(['='.join([k, urllib.parse.quote_plus(request[k])]) for k in request.keys()])
+        sig_str = '&'.join(['='.join([k.lower(), urllib.parse.quote_plus(request[k]).lower().replace('+', '%20')]) for k in
+                            sorted(request)])
+        sig = hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256)
+        sig = hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()
+        sig = base64.encodebytes(hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest())
+        sig = base64.encodebytes(
+            hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()).strip()
+        sig = urllib.parse.quote_plus(base64.encodebytes(
+            hmac.new(secretkey.encode('utf-8'), sig_str.encode('utf-8'), hashlib.sha256).digest()).strip())
+
+        req = baseurl + request_str + '&signature=' + sig
+        context = ssl._create_unverified_context()
+        res = urllib.request.urlopen(req, context=context)
+        return res.read().decode()
+    return False
+
+
+def test_communication(ip, port):
+    try:
+        sock = socket.create_connection((ip, port), timeout=1)
+        if sock:
+            return True
+    except socket.error:
+        return False
 
 
 def getMoldStatus(options):
@@ -56,31 +73,38 @@ def getMoldStatus(options):
 
         # API 호출
         result = excuteApi(request, options)
-        data = json.loads(result)
-        state_value = data['listmanagementserversmetricsresponse']['managementserver'][0]['state']
-        if state_value == 'Up':
-            syslog.syslog(syslog.LOG_INFO, 'Management Server Status is Up!')
-            return True
+        if result:
+            data = json.loads(result)
+            state_value = data['listmanagementserversmetricsresponse']['managementserver'][0]['state']
+            if state_value == 'Up':
+                syslog.syslog(syslog.LOG_INFO, 'Management Server Status is Up!')
+                return True
+            else:
+                syslog.syslog(syslog.LOG_INFO, 'Waiting for the MOLD to operate.')
         else:
-            syslog.syslog(syslog.LOG_INFO, 'Waiting for the MOLD to operate.')
+            syslog.syslog(syslog.LOG_INFO, 'Waiting for connection to MOLD.')
         time.sleep(check_interval)
     syslog.syslog(syslog.LOG_INFO, 'Timed out. MOLD Status did not become Up within the specified time.')
     return False
 
 
 def getVirtualMachinesStatus(options):
-    # reqest 세팅
-    request = {}
-    request['command'] = 'listVirtualMachines'
-    request['id'] = options.get("--vm_id")
-    request['response'] = 'json'
-    request['apikey'] = options.get("--api_key")
+    check_mold_status = getMoldStatus(options)
+    if (check_mold_status):
+        # reqest 세팅
+        request = {}
+        request['command'] = 'listVirtualMachines'
+        request['id'] = options.get("--vm_id")
+        request['response'] = 'json'
+        request['apikey'] = options.get("--api_key")
 
-    # API 호출
-    result = excuteApi(request, options)
-    data = json.loads(result)
-    state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
-    return str(state_value)
+        # API 호출
+        result = excuteApi(request, options)
+        data = json.loads(result)
+        state_value = data['listvirtualmachinesresponse']['virtualmachine'][0]['state']
+        return str(state_value)
+    else:
+        syslog.syslog(syslog.LOG_INFO, 'Getting Virtual Machines Status is Failed. for Mold status is not Up')
 
 
 def setVirtualMachinesStop(options):
@@ -229,7 +253,7 @@ def define_new_opts():
 
 # Main agent method
 def main():
-    device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "m_ip", "m_port","m_total_timeout", "m_interval"]
+    device_opt = ["port", "no_password", "zone", "api_protocol", "api_key", "secret_key", "vm_id", "m_ip", "m_port", "m_total_timeout", "m_interval"]
     atexit.register(atexit_handler)
 
     define_new_opts()

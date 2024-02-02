@@ -1,10 +1,9 @@
 <?xml version="1.0" ?>
-<resource-agent name="fence_mold" shortdesc="Fence agent for AWS (Amazon Web Services)" >
-<longdesc>fence_aws is a Power Fencing agent for AWS (Amazon WebServices). It uses the boto3 library to connect to AWS.
+<resource-agent name="fence_mold" shortdesc="Fence agent for MOLD" >
+<longdesc>fence_mold is a Power Fencing agent for MOLD
 
-boto3 can be configured with AWS CLI or by creating ~/.aws/credentials.
-For instructions see: https://boto3.readthedocs.io/en/latest/guide/quickstart.html#configuration</longdesc>
-<vendor-url>http://www.amazon.com</vendor-url>
+</longdesc>
+<vendor-url>http://www.ablecloud.io</vendor-url>
 <parameters>
 	<parameter name="action" unique="0" required="1">
 		<getopt mixed="-o, --action=[action]" />
@@ -21,35 +20,40 @@ For instructions see: https://boto3.readthedocs.io/en/latest/guide/quickstart.ht
 		<content type="string"  />
 		<shortdesc lang="en">Physical plug number on device, UUID or identification of machine</shortdesc>
 	</parameter>
-	<parameter name="region" unique="0" required="0">
-		<getopt mixed="-r, --region=[region]" />
+	<parameter name="zone" unique="0" required="0">
+		<getopt mixed="-z, --zone=[zone]" />
 		<content type="string"  />
-		<shortdesc lang="en">Region.</shortdesc>
+		<shortdesc lang="en">Zone.</shortdesc>
 	</parameter>
-	<parameter name="access_key" unique="0" required="0">
-		<getopt mixed="-a, --access-key=[key]" />
+	<parameter name="api_protocol" unique="0" required="0">
+		<getopt mixed="-ap, --api-protocol=[api-protocol]" />
 		<content type="string"  />
-		<shortdesc lang="en">Access Key.</shortdesc>
+		<shortdesc lang="en">API Protocol.</shortdesc>
+	</parameter>
+	<parameter name="api_key" unique="0" required="0">
+		<getopt mixed="-a, --api-key=[key]" />
+		<content type="string"  />
+		<shortdesc lang="en">API Key.</shortdesc>
 	</parameter>
 	<parameter name="secret_key" unique="0" required="0">
-		<getopt mixed="-s, --secret-key=[key]" />
+		<getopt mixed="-s, --secret_key=[key]" />
 		<content type="string"  />
 		<shortdesc lang="en">Secret Key.</shortdesc>
 	</parameter>
-	<parameter name="filter" unique="0" required="0">
-		<getopt mixed="--filter=[key=value]" />
+	<parameter name="vm_id" unique="0" required="0">
+		<getopt mixed="-vi, --vm-id=[option]" />
 		<content type="string"  />
-		<shortdesc lang="en">Filter for list-action</shortdesc>
+		<shortdesc lang="en">VM ID.</shortdesc>
 	</parameter>
-	<parameter name="boto3_debug" unique="0" required="0">
-		<getopt mixed="-b, --boto3_debug=[option]" />
-		<content type="string" default="False"  />
-		<shortdesc lang="en">Boto Lib debug</shortdesc>
+	<parameter name="m_ip" unique="0" required="0">
+		<getopt mixed="-mip, --mip=[mip]" />
+		<content type="string"  />
+		<shortdesc lang="en">MOLD IP Address.</shortdesc>
 	</parameter>
-	<parameter name="skip_race_check" unique="0" required="0">
-		<getopt mixed="--skip-race-check" />
-		<content type="boolean"  />
-		<shortdesc lang="en">Skip race condition check</shortdesc>
+	<parameter name="m_port" unique="0" required="0">
+		<getopt mixed="-mpt, --mport=[mport]" />
+		<content type="string"  />
+		<shortdesc lang="en">MOLD PORT.</shortdesc>
 	</parameter>
 	<parameter name="quiet" unique="0" required="0">
 		<getopt mixed="-q, --quiet" />

@@ -64,7 +64,7 @@ def test_communication(ip, port):
 def getMoldStatus(options):
     total_wait_time = int(options.get("--m_total_timeout"))# minutes in seconds
     check_interval = int(options.get("--m_interval"))  # Check approximately times a minute
-    for _ in range(int(total_wait_time / check_interval)):
+    for _ in range(int(check_interval)):
         # reqest 세팅
         request = {}
         request['command'] = 'listManagementServersMetrics'
@@ -83,7 +83,7 @@ def getMoldStatus(options):
                 syslog.syslog(syslog.LOG_INFO, 'Waiting for the MOLD to operate.')
         else:
             syslog.syslog(syslog.LOG_INFO, 'Waiting for connection to MOLD.')
-        time.sleep(check_interval)
+        time.sleep(int(total_wait_time / check_interval))
     syslog.syslog(syslog.LOG_INFO, 'Timed out. MOLD Status did not become Up within the specified time.')
     return False
 

@@ -562,17 +562,17 @@ AS_IF([test -n "$SOURCE_EPOCH"],
 	])
 AC_MSG_NOTICE([using source epoch $($UTC_DATE_AT$SOURCE_EPOCH +'%F %T %Z')])
 
-if test "x$VERSION" = "xUNKNOWN"; then
-	AC_MSG_ERROR([m4_text_wrap([
-  configure was unable to determine the source tree's current version. This
-  generally happens when using git archive (or the github download button)
-  generated tarball/zip file. In order to workaround this issue, either use git
-  clone https://github.com/ClusterLabs/fence-agents.git or use an official release
-  tarball. Alternatively you can add a compatible version in a .tarball-version
-  file at the top of the source tree, wipe your autom4te.cache dir and generated
-  configure, and rerun autogen.sh.
-  ], [  ], [   ], [76])])
-fi
+#if test "x$VERSION" = "xUNKNOWN"; then
+#	AC_MSG_ERROR([m4_text_wrap([
+#  configure was unable to determine the source tree's current version. This
+#  generally happens when using git archive (or the github download button)
+#  generated tarball/zip file. In order to workaround this issue, either use git
+#  clone https://github.com/ClusterLabs/fence-agents.git or use an official release
+#  tarball. Alternatively you can add a compatible version in a .tarball-version
+#  file at the top of the source tree, wipe your autom4te.cache dir and generated
+#  configure, and rerun autogen.sh.
+#  ], [  ], [   ], [76])])
+#fi
 
 
 AC_CONFIG_FILES([Makefile

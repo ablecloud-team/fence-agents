@@ -72,6 +72,7 @@ fence-agents-ipmilan \\
 fence-agents-kdump \\
 fence-agents-ldom \\
 fence-agents-lpar \\
+fence-agents-mold \\
 fence-agents-mpath \\
 fence-agents-netio \\
 fence-agents-ovh \\
@@ -102,6 +103,7 @@ fence-agents-aws \\
 fence-agents-compute \\
 fence-agents-gce \\
 fence-agents-ironic \\
+fence-agents-mold \\
 fence-agents-openstack
 
 EOF)
@@ -944,6 +946,19 @@ Fence agent for OpenStack's Nova service.
 %{_sbindir}/fence_openstack
 %{_mandir}/man8/fence_openstack.8*
 %endif
+
+%package mold
+License: GPL-2.0-or-later AND LGPL-2.0-or-later
+Summary: Fence agent for ABLESTACK MOLD
+Requires: /usr/bin/ipmitool
+Requires: fence-agents-common = %{version}-%{release}
+BuildArch: noarch
+Obsoletes: fence-agents < 3.1.13
+%description mold
+Fence agents for ablestack mold.
+%files mold
+%{_sbindir}/fence_mold
+%{_mandir}/man8/fence_mold.8*
 
 %package ovh
 License: GPL-2.0-or-later AND LGPL-2.0-or-later
